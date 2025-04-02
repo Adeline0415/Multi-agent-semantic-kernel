@@ -17,6 +17,7 @@ class Agent:
         self.skills = skills or []
         self.messages = []  # 訊息歷史
         self.kernel = None  # Semantic Kernel 實例
+        self.context = {}  # 上下文字典，用於存儲持久信息
     
     async def receive_message(self, message: str, sender: Optional[str] = None) -> str:
         """
@@ -100,3 +101,15 @@ class Agent:
     def clear_messages(self):
         """清除所有訊息歷史"""
         self.messages = []
+
+    def update_context(self, key: str, value: Any):
+        """更新代理上下文"""
+        self.context[key] = value
+    
+    def get_context(self, key: str, default: Any = None) -> Any:
+        """獲取代理上下文中的值"""
+        return self.context.get(key, default)
+    
+    def clear_context(self):
+        """清除代理上下文"""
+        self.context = {}

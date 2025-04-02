@@ -192,8 +192,9 @@ if user_input:
     # 處理響應
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            # 使用 asyncio.run 來執行異步函數
-            response = asyncio.run(st.session_state.multi_agent_system.process_message(user_input))
+            # 使用多智能體系統處理消息，並包含歷史
+            response = asyncio.run(st.session_state.multi_agent_system.process_message(user_input, include_history=True))
+            
             
             # 顯示響應
             st.markdown(response)

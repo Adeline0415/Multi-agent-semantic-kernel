@@ -100,6 +100,10 @@ class ConversationAgent(Agent):
             # 更新聊天歷史
             self.chat_history.append({"role": "assistant", "content": str(answer)})
             
+            # 如果歷史太長，保留最近的部分
+            if len(self.chat_history) > 20:
+                self.chat_history = self.chat_history[-20:]
+            
             return str(answer)
         except Exception as e:
             return "我現在無法處理您的請求。請稍後再試。"

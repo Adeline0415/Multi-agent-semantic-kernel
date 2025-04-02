@@ -13,6 +13,7 @@ from agents.document_agent import DocumentAgent
 from agents.code_agent import CodeAgent
 from agents.creative_agent import CreativeAgent
 from agents.search_agent import SearchAgent
+from utils.memory_manager import MemoryManager
 
 class MultiAgentSystem:
     """多智能體系統主類"""
@@ -48,6 +49,10 @@ class MultiAgentSystem:
         
         # 記錄系統是否已設置
         self.is_setup = False
+        # 系統記憶
+        self.conversation_history = []
+        # 使用記憶管理器
+        self.memory_manager = MemoryManager(max_items=100)
     
     async def setup(self):
         """設置系統 - 添加 AI 服務並配置代理"""
@@ -99,12 +104,13 @@ class MultiAgentSystem:
         except Exception as e:
             raise Exception(f"設置多智能體系統時出錯: {str(e)}")
     
-    async def process_message(self, message: str) -> str:
+    async def process_message(self, message: str, include_history: bool = True) -> str:
         """
-        處理用戶消息
+        處理用戶消息，並可選擇性地包含對話歷史
         
         Args:
             message: 用戶消息內容
+            include_history: 是否包含對話歷史
             
         Returns:
             系統回應
@@ -114,8 +120,23 @@ class MultiAgentSystem:
             await self.setup()
         
         try:
+            # 如果需要包含歷史，使用記憶管理器獲取歷史
+            if include_history:
+                # 獲取最近的記憶並格式化
+                history_text = self.memory_manager.format_as_text(
+                    self.memory_manager.get_recent_memories(10)
+                )
+                enhanced_message = f"[對話歷史]\n{history_text}\n\n[新問題]\n{message}"
+            else:
+                enhanced_message = message
+            
             # 通過協調器處理消息
-            response = await self.coordinator.process_message(message, "user")
+            response = await self.coordinator.process_message(enhanced_message, "user")
+            
+            # 更新記憶
+            self.memory_manager.add_memory(message, "user")
+            self.memory_manager.add_memory(response, "assistant")
+            
             return response
         except Exception as e:
             return f"處理您的請求時出錯: {str(e)}"
@@ -201,3 +222,13 @@ class MultiAgentSystem:
         
         # 清除對話代理的聊天歷史
         self.conversation_agent.clear_chat_history()
+        # 清除系統記憶
+        self.conversation_history = []
+
+    def _format_conversation_history(self) -> str:
+        """格式化對話歷史為文本"""
+        history_text = ""
+        for i, message in enumerate(self.conversation_history):
+            role = "用戶" if message["role"] == "user" else "助手"
+            history_text += f"{role}: {message['content']}\n"
+        return history_text
