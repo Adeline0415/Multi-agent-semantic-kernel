@@ -4,3 +4,4 @@ from .conversation_agent import ConversationAgent
 from .document_agent import DocumentAgent
 from .code_agent import CodeAgent
 from .creative_agent import CreativeAgent
+from .search_agent import SearchAgent

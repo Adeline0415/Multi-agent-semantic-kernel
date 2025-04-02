@@ -134,6 +134,8 @@ with st.sidebar:
                 "content": f"文檔 '{doc_name or uploaded_file.name}' 已上傳並準備好供分析。"
             })
     
+    
+    
     # 顯示代理狀態
     with st.sidebar.expander("Agent Status", expanded=False):
         if st.button("Refresh Status"):

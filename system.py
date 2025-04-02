@@ -12,6 +12,7 @@ from agents.conversation_agent import ConversationAgent
 from agents.document_agent import DocumentAgent
 from agents.code_agent import CodeAgent
 from agents.creative_agent import CreativeAgent
+from agents.search_agent import SearchAgent
 
 class MultiAgentSystem:
     """多智能體系統主類"""
@@ -43,6 +44,7 @@ class MultiAgentSystem:
         self.document_agent = DocumentAgent()
         self.code_agent = CodeAgent()
         self.creative_agent = CreativeAgent()
+        self.search_agent = SearchAgent()
         
         # 記錄系統是否已設置
         self.is_setup = False
@@ -82,12 +84,14 @@ class MultiAgentSystem:
             self.document_agent.setup_kernel(self.kernel)
             self.code_agent.setup_kernel(self.kernel)
             self.creative_agent.setup_kernel(self.kernel)
+            self.search_agent.setup_kernel(self.kernel)
             
             # 向協調器註冊所有代理
             self.coordinator.register_agent("conversation_agent", self.conversation_agent)
             self.coordinator.register_agent("document_agent", self.document_agent)
             self.coordinator.register_agent("code_agent", self.code_agent)
             self.coordinator.register_agent("creative_agent", self.creative_agent)
+            self.coordinator.register_agent("search_agent", self.search_agent)
             
             # 設置完成
             self.is_setup = True
@@ -115,6 +119,22 @@ class MultiAgentSystem:
             return response
         except Exception as e:
             return f"處理您的請求時出錯: {str(e)}"
+    
+    async def search(self, query: str) -> str:
+        """
+        直接執行搜索，繞過協調器
+        
+        Args:
+            query: 搜索查詢
+            
+        Returns:
+            搜索結果
+        """
+        # 確保系統已設置
+        if not self.is_setup:
+            await self.setup()
+        
+        return await self.search_agent.process_message(query)
     
     def upload_document(self, file_path: str, document_name: Optional[str] = None) -> str:
         """
@@ -150,7 +170,8 @@ class MultiAgentSystem:
             "conversation": self.conversation_agent,
             "document": self.document_agent,
             "code": self.code_agent,
-            "creative": self.creative_agent
+            "creative": self.creative_agent,
+            "search": self.search_agent
         }
     
     def get_agent_status(self) -> Dict[str, Any]:

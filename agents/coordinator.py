@@ -45,10 +45,11 @@ class CoordinatorAgent(Agent):
         請根據用戶的輸入，選擇最合適的代理。
         
         可用的代理:
-        - conversation_agent: 處理一般對話、問候和閒聊
+        - conversation_agent: 處理一般對話、問候、閒聊、信息提供和一般推理
         - document_agent: 處理文檔分析、摘要、文檔問答
-        - code_agent: 處理代碼生成、代碼分析、代碼執行
+        - code_agent: 處理代碼生成、代碼分析、代碼執行、code generation、debug、code explanation
         - creative_agent: 處理創意內容生成、寫作、創意任務
+        - search_agent: 處理網絡搜尋、實時信息、事實查詢
         
         用戶輸入: {{$input}}
         
@@ -143,12 +144,41 @@ class CoordinatorAgent(Agent):
         """
         message = message.lower()
         
-        # 簡單的關鍵詞匹配
-        if any(kw in message for kw in ["code", "python", "程式", "代碼", "執行", "debug", "程式碼", "c++", "java", "c language"]):
+        # 搜索相關關鍵詞
+        search_keywords = [
+            "搜索", "查詢", "查找", "找找", "搜尋", "網絡", "最新", "新聞", 
+            "今天", "昨天", "最近", "search", "find", "lookup", "web", 
+            "internet", "news", "recent", "latest"
+        ]
+        
+        # 代碼相關關鍵詞
+        code_keywords = [
+            "代碼", "程式", "編程", "函數", "方法", "變數", "循環", "條件", 
+            "算法", "code", "program", "function", "method", "variable", 
+            "loop", "algorithm", "python", "javascript", "java", "c++"
+        ]
+        
+        # 文檔相關關鍵詞
+        document_keywords = [
+            "文檔", "文件", "pdf", "word", "excel", "表格", "摘要", "總結", 
+            "document", "file", "summarize", "summary", "extract"
+        ]
+        
+        # 創意相關關鍵詞
+        creative_keywords = [
+            "寫", "創作", "故事", "文章", "創意", "設計", "廣告", "標語", 
+            "write", "create", "story", "article", "creative", "design", 
+            "advertisement", "slogan", "poem", "poetry"
+        ]
+        
+        # 檢查關鍵詞匹配
+        if any(keyword in message for keyword in search_keywords):
+            return "search_agent"
+        elif any(keyword in message for keyword in code_keywords):
             return "code_agent"
-        elif any(kw in message for kw in ["document", "文檔", "文件", "pdf", "word", "excel", "閱讀", "摘要", "分析", "檔案", "file", "docx", "Word檔"]):
+        elif any(keyword in message for keyword in document_keywords):
             return "document_agent"
-        elif any(kw in message for kw in ["generate", "create", "write", "生成", "創建", "寫一篇", "make a"]):
+        elif any(keyword in message for keyword in creative_keywords):
             return "creative_agent"
         else:
             return "conversation_agent"  # 默認使用對話代理
