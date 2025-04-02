@@ -117,27 +117,22 @@ with st.sidebar:
             key="sidebar_uploader"
         )
         doc_name = st.text_input("Document name (optional)")
-        
+        # 在 app.py 中，確保文檔上傳後正確通知系統
         if uploaded_file is not None and st.button("Upload"):
-            # 创建临时文件
+            # 保存臨時文件
             with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp_file:
                 tmp_file.write(uploaded_file.getvalue())
                 tmp_path = tmp_file.name
             
-            # 上传文件到系统
-            result = st.session_state.multi_agent_system.upload_document(
-                tmp_path, 
-                doc_name or uploaded_file.name
-            )
-            
-            # 保存文件信息
-            st.session_state.uploaded_files.append({
-                "name": doc_name or uploaded_file.name,
-                "path": tmp_path,
-                "type": "document"
-            })
-            
+            # 上傳文件到系統並顯示結果
+            result = st.session_state.multi_agent_system.upload_document(tmp_path, doc_name or uploaded_file.name)
             st.sidebar.success(result)
+            
+            # 確保將文檔信息添加到聊天上下文
+            st.session_state.chat_history.append({
+                "role": "system", 
+                "content": f"文檔 '{doc_name or uploaded_file.name}' 已上傳並準備好供分析。"
+            })
     
     # 顯示代理狀態
     with st.sidebar.expander("Agent Status", expanded=False):

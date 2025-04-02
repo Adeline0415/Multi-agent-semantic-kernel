@@ -144,11 +144,11 @@ class CoordinatorAgent(Agent):
         message = message.lower()
         
         # 簡單的關鍵詞匹配
-        if any(kw in message for kw in ["code", "python", "程式", "代碼", "執行"]):
+        if any(kw in message for kw in ["code", "python", "程式", "代碼", "執行", "debug", "程式碼", "c++", "java", "c language"]):
             return "code_agent"
-        elif any(kw in message for kw in ["document", "文檔", "文件", "pdf", "word", "excel", "閱讀", "摘要"]):
+        elif any(kw in message for kw in ["document", "文檔", "文件", "pdf", "word", "excel", "閱讀", "摘要", "分析", "檔案", "file", "docx", "Word檔"]):
             return "document_agent"
-        elif any(kw in message for kw in ["generate", "create", "write", "生成", "創建", "寫一篇"]):
+        elif any(kw in message for kw in ["generate", "create", "write", "生成", "創建", "寫一篇", "make a"]):
             return "creative_agent"
         else:
             return "conversation_agent"  # 默認使用對話代理
