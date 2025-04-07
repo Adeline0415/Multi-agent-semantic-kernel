@@ -102,10 +102,17 @@ class CoordinatorAgent(Agent):
             if self.decision_function is None and self.kernel is not None:
                 self._register_decision_function()
             
-            # 使用決策功能選擇代理
+             # 提取最新訊息進行決策
+            latest_message = message
+            if "[新問題]" in message:
+                parts = message.split("[新問題]")
+                if len(parts) > 1:
+                    latest_message = parts[1].strip()
+            
+            # 使用最新訊息進行決策
             decision_result = await self.kernel.invoke(
                 self.decision_function,
-                KernelArguments(input=message)
+                KernelArguments(input=latest_message)
             )
             
             # 解析決策結果
@@ -115,7 +122,7 @@ class CoordinatorAgent(Agent):
                 task = decision.get("task", message)
             except (json.JSONDecodeError, AttributeError):
                 # 如果決策結果無法解析，使用備用邏輯
-                selected_agent = self._fallback_decision(message)
+                selected_agent = self._fallback_decision(latest_message)
                 task = message
             
             # 檢查選定的代理是否註冊

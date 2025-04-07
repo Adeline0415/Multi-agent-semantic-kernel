@@ -194,8 +194,6 @@ if user_input:
         with st.spinner("Thinking..."):
             # 使用多智能體系統處理消息，並包含歷史
             response = asyncio.run(st.session_state.multi_agent_system.process_message(user_input, include_history=True))
-            
-            
             # 顯示響應
             st.markdown(response)
     
