@@ -135,24 +135,30 @@ class CodeAgent(Agent):
             code = code_result.get("code", "")
             explanation = code_result.get("explanation", "")
             
-            # 根據語言決定執行方式
-            if language == "python":
-                # 檢查並安裝依賴
-                missing_deps = await self.check_dependencies(dependencies)
+            # 檢查環境
+            env_checker = EnvironmentChecker()
+            env_ready, env_message = await env_checker.check_environment(language)
+            
+            # 根據語言和環境狀態決定執行方式
+            if env_ready:
+                # 環境已準備好，可以嘗試執行
+                
+                # 檢查並安裝依賴（如果是Python）
                 install_logs = ""
+                if language == "python" and dependencies:
+                    missing_deps = await self.check_dependencies(dependencies)
+                    if missing_deps and self.allow_installs:
+                        install_logs = await self.install_dependencies(missing_deps)
                 
-                if missing_deps and self.allow_installs:
-                    install_logs = await self.install_dependencies(missing_deps)
-                
-                # 執行 Python 代碼
-                execution_result = await self._execute_python(code)
+                # 執行代碼
+                execution_result = await self.execute_code(code, language)
                 
                 # 構建響應
                 response = f"# {language.capitalize()} 代碼\n\n"
                 
-                if missing_deps:
-                    response += f"## 缺少的依賴項\n\n"
-                    response += ", ".join(missing_deps) + "\n\n"
+                if dependencies:
+                    response += f"## 依賴項\n\n"
+                    response += "\n".join(dependencies) + "\n\n"
                     
                     if install_logs:
                         response += f"## 安裝日誌\n\n```\n{install_logs}\n```\n\n"
@@ -165,7 +171,7 @@ class CodeAgent(Agent):
                 
                 return response
             else:
-                # 對於非 Python 代碼，只返回代碼和説明
+                # 環境未準備好，只顯示代碼並提供安裝指南
                 response = f"# {language.capitalize()} 代碼\n\n"
                 
                 if dependencies:
@@ -177,7 +183,9 @@ class CodeAgent(Agent):
                 if explanation:
                     response += f"## 説明\n\n{explanation}\n"
                 
-                response += "\n**注意**: 目前只支持 Python 代碼的直接執行。其他語言的代碼需要您手動執行。\n"
+                response += f"## 環境配置\n\n{env_message}\n\n"
+                response += "請安裝所需環境後再執行此代碼。\n"
+                
                 return response
             
         except Exception as e:
@@ -356,7 +364,7 @@ class CodeAgent(Agent):
             return await self._execute_java(code)
         elif language in ["c#", "csharp", "cs"]:
             return await self._execute_csharp(code)
-        elif language in ["c", "c++"]:
+        elif language in ["c", "c++", "cpp"]:
             return await self._execute_cpp(code)
         elif language in ["php"]:
             return await self._execute_php(code)
