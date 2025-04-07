@@ -1,3 +1,4 @@
+#search_agent.py
 import os
 import asyncio
 import requests
@@ -41,16 +42,19 @@ class SearchAgent(Agent):
         
         # 搜索結果處理提示模板
         search_prompt = """
-        你是一個負責處理網絡搜索結果的智能助手。請根據以下搜索結果回答問題：
-        
-        搜索查詢: {{$query}}
-        
+        你是一個負責處理網絡搜索結果的智能助手。請根據以下搜索結果回答用戶的問題。
+
+        用戶問題: {{$query}}
+
         搜索結果:
         {{$search_results}}
-        
-        請基於搜索結果提供全面且有條理的回答。包括相關事實、數據和來源網站（如果適用）。
-        如果搜索結果中沒有足夠的信息來回答問題，請誠實地說明。
-        
+
+        請基於上述搜索結果提供具體且有用的回答。請確保：
+        1. 如果搜索結果中有與用戶問題相關的信息，請直接提供這些信息
+        2. 如果找到多個相關信息，請整合並總結這些信息
+        3. 如果搜索結果中沒有與用戶問題直接相關的信息，請誠實地說明
+        4. 提供相關建議幫助用戶獲取更多信息
+
         回答:
         """
         
@@ -76,6 +80,76 @@ class SearchAgent(Agent):
             plugin_name="searchPlugin",
             prompt_template_config=search_config,
         )
+
+    async def preprocess_search_query(self, message: str) -> str:
+        """
+        預處理搜索查詢，從增強的消息中提取核心搜索內容
+        
+        Args:
+            message: 可能包含歷史記錄的增強消息
+            
+        Returns:
+            優化後的搜索查詢
+        """
+        # 如果消息簡短，直接使用
+        if len(message) < 100 and "[對話歷史]" not in message and "[新問題]" not in message:
+            return message
+            
+        # 配置提取查詢的提示模板
+        extract_query_prompt = """
+        你是一個智能搜索助手。請分析以下對話歷史和新問題，然後提取出最適合用於網絡搜索的簡潔查詢。
+        
+        對話內容:
+        {{$message}}
+        
+        請僅返回一個簡短的搜索查詢（不超過10個詞），無需其他解釋。這個查詢應該捕捉用戶真正想要搜索的核心內容。
+        """
+        
+        # 創建臨時函數來提取搜索查詢
+        extract_config = PromptTemplateConfig(
+            template=extract_query_prompt,
+            template_format="semantic-kernel",
+            input_variables=[
+                InputVariable(name="message", description="包含對話歷史的消息", is_required=True),
+            ],
+            execution_settings=AzureChatPromptExecutionSettings(
+                service_id="default",
+                max_tokens=50,
+                temperature=0.0,  # 使用確定性輸出
+            )
+        )
+        
+        # 添加提取函數到 Kernel
+        extract_function = self.kernel.add_function(
+            function_name="extractSearchQuery",
+            plugin_name="searchPlugin",
+            prompt_template_config=extract_config,
+        )
+        
+        # 執行查詢提取
+        try:
+            optimized_query = await self.kernel.invoke(
+                extract_function,
+                KernelArguments(message=message)
+            )
+            
+            # 確保結果是字符串並移除多餘空格
+            result = str(optimized_query).strip()
+            print(f"原始輸入: {message[:100]}...")
+            print(f"優化後的搜索查詢: {result}")
+            
+            return result
+        except Exception as e:
+            print(f"提取搜索查詢時出錯: {str(e)}")
+            
+            # 如果出錯，嘗試簡單提取 [新問題] 後的內容
+            if "[新問題]" in message:
+                parts = message.split("[新問題]")
+                if len(parts) > 1:
+                    return parts[1].strip()
+            
+            # 如果上述方法都失敗，則返回原始消息
+            return message
     
     async def process_message(self, message: str, sender: Optional[str] = None) -> str:
         """
@@ -97,17 +171,32 @@ class SearchAgent(Agent):
             return "搜索功能未配置。請設置 BING_SEARCH_API_KEY 環境變數。"
         
         try:
-            # 執行搜索
-            search_results = await self.bing_search(message)
+            # 預處理搜索查詢
+            optimized_query = await self.preprocess_search_query(message)
             
-            # 使用 AI 處理搜索結果
+            # 執行搜索
+            search_results = await self.bing_search(optimized_query)
+            
+            # 記錄搜索信息
+            print(f"原始消息: {message[:100]}...")
+            print(f"優化查詢: {optimized_query}")
+            print(f"搜索結果大小: {len(search_results)} 字符")
+            
+            # 使用 AI 處理搜索結果，但使用原始問題來保持上下文
             response = await self.kernel.invoke(
                 self.search_function,
-                KernelArguments(query=message, search_results=search_results)
+                KernelArguments(
+                    query=message,  # 原始問題提供完整上下文
+                    optimized_query=optimized_query,  # 提供優化後的查詢供參考
+                    search_results=search_results  # 搜索結果
+                )
             )
             
             return str(response)
         except Exception as e:
+            import traceback
+            print(f"搜索處理錯誤: {str(e)}")
+            print(traceback.format_exc())
             return f"搜索過程中出錯: {str(e)}"
     
     async def bing_search(self, query: str, count: int = 5) -> str:
