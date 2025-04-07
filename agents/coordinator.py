@@ -40,25 +40,34 @@ class CoordinatorAgent(Agent):
     def _register_decision_function(self):
         """註冊決策功能，用於將任務分配到合適的代理"""
         
-        # 決策提示模板
+        # 決策提示模板，更強調對用戶真實意圖的理解
         decision_prompt = """
         你是一個智能協調系統，負責將用戶請求路由到最合適的專業代理處理。
-        請根據用戶的輸入，選擇最合適的代理。
+        請仔細分析用戶的輸入，理解其真實意圖，然後選擇最合適的代理。
         
         可用的代理:
-        - conversation_agent: 處理一般對話、問候、閒聊、信息提供和一般推理
-        - document_agent: 處理文檔分析、摘要、文檔問答
-        - code_agent: 處理代碼生成、代碼分析、代碼執行、code generation、debug、code explanation
+        - conversation_agent: 處理一般對話、問候、閒聊、問答、概念解釋、推理分析、選擇題、測驗問題等
+        - document_agent: 處理文檔分析、摘要、文檔問答、檔案處理
+        - code_agent: 處理明確要求生成或分析代碼(code)的請求，如果用戶明確表示不要代碼，請不要選擇此代理
         - creative_agent: 處理創意內容生成、寫作、創意任務
-        - search_agent: 處理網絡搜尋、實時信息、事實查詢
+        - search_agent: 處理明確需要最新網絡信息的搜尋請求
+        
+        重要提示:
+        1. 用戶如果只是提到程式相關概念但沒有要求生成代碼，應該使用 conversation_agent
+        2. 請優先依照用戶當前最新訊息來判斷使用哪個agent，而不是之前的訊息
+        3. 選擇題、測驗問題、理論性問題應該使用 conversation_agent，即使題目中包含程式相關的內容
+        4. 只有當用戶明確需要網絡查詢或最新信息時才選擇 search_agent
+        5. 若無法判斷用戶要使用何種agent則default使用conversation_agent
+        6. 如果用戶使用否定句請正確閱讀其意圖，例如「不用幫我生code」應該使用 conversation_agent
+        7. 盡量使用用戶提問的語言作答
         
         用戶輸入: {{$input}}
         
         請以 JSON 格式回復，格式如下:
         {
-          "agent": "選定的代理名稱",
-          "reason": "選擇該代理的原因",
-          "task": "給代理的具體任務描述"
+        "agent": "選定的代理名稱",
+        "reason": "選擇該代理的詳細原因，說明你如何理解用戶的真實意圖",
+        "task": "給代理的具體任務描述"
         }
         
         只返回 JSON，不要有其他多餘的解釋。
@@ -74,7 +83,7 @@ class CoordinatorAgent(Agent):
             ],
             execution_settings=AzureChatPromptExecutionSettings(
                 service_id="default",
-                max_tokens=500,
+                max_tokens=800,  # 增加 token 數以允許更詳細的分析
                 temperature=0.0,  # 確定性輸出
             )
         )
