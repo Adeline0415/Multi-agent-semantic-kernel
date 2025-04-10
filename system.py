@@ -106,43 +106,6 @@ class MultiAgentSystem:
             
         except Exception as e:
             raise Exception(f"設置多智能體系統時出錯: {str(e)}")
-    
-    # async def process_message(self, message: str, include_history: bool = True) -> str:
-    #     """
-    #     處理用戶消息，並可選擇性地包含對話歷史
-        
-    #     Args:
-    #         message: 用戶消息內容
-    #         include_history: 是否包含對話歷史
-            
-    #     Returns:
-    #         系統回應
-    #     """
-    #     # 確保系統已設置
-    #     if not self.is_setup:
-    #         await self.setup()
-        
-    #     try:
-    #         # 如果需要包含歷史，使用記憶管理器獲取歷史
-    #         if include_history:
-    #             # 獲取最近的記憶並格式化
-    #             history_text = self.memory_manager.format_as_text(
-    #                 self.memory_manager.get_recent_memories(10)
-    #             )
-    #             enhanced_message = f"[對話歷史]\n{history_text}\n\n[新問題]\n{message}"
-    #         else:
-    #             enhanced_message = message
-            
-    #         # 通過協調器處理消息
-    #         response = await self.coordinator.process_message(enhanced_message, "user")
-            
-    #         # 更新記憶
-    #         self.memory_manager.add_memory(message, "user")
-    #         self.memory_manager.add_memory(response, "assistant")
-            
-    #         return response
-    #     except Exception as e:
-    #         return f"處理您的請求時出錯: {str(e)}"
         
     async def process_message(self, message: str, include_history: bool = True) -> str:
         """
