@@ -4,6 +4,8 @@ import asyncio
 import traceback
 import subprocess
 import importlib
+import re
+import io
 from typing import Dict, List, Any, Optional, Tuple
 from io import StringIO
 import pandas as pd
@@ -18,7 +20,7 @@ from utils.environment_checker import EnvironmentChecker
 from .base_agent import Agent
 
 class CodeAgent(Agent):
-    """處理代碼生成和執行的智能代理，支持多種程式語言和依賴管理"""
+    """處理代碼生成和執行的智能代理，支持多種程式語言和依賴管理，帶有自動錯誤修復和測試數據生成功能"""
     
     def __init__(self, name: str = "CodeAgent"):
         """
@@ -27,10 +29,13 @@ class CodeAgent(Agent):
         Args:
             name: 代理名稱
         """
-        super().__init__(name, skills=["代碼生成", "代碼執行", "代碼解釋", "代碼除錯", "多語言支持", "依賴管理"])
+        super().__init__(name, skills=["代碼生成", "代碼執行", "代碼解釋", "代碼除錯", "多語言支持", "依賴管理", "自動錯誤修復", "測試數據生成"])
         self.code_gen_function = None
+        self.code_fix_function = None
+        self.test_data_gen_function = None  # 新增：測試數據生成功能
         self.supported_languages = ["python", "javascript", "java", "c++", "c#", "go", "ruby", "php", "rust", "typescript", "bash", "r", "sql"]
         self.allow_installs = True  # 是否允許安裝新的依賴
+        self.max_fix_attempts = 3   # 最大修復嘗試次數
     
     def setup_kernel(self, kernel: Kernel):
         """
@@ -41,6 +46,8 @@ class CodeAgent(Agent):
         """
         super().setup_kernel(kernel)
         self._register_code_gen_function()
+        self._register_code_fix_function()
+        self._register_test_data_gen_function()  # 註冊測試數據生成功能
     
     def _register_code_gen_function(self):
         """註冊代碼生成功能"""
@@ -105,6 +112,133 @@ class CodeAgent(Agent):
             prompt_template_config=code_gen_config,
         )
     
+    def _register_code_fix_function(self):
+        """註冊代碼修復功能"""
+        
+        # 代碼修復提示模板
+        code_fix_prompt = """
+        我需要你幫我修復下面的代碼，該代碼執行時遇到了錯誤。
+
+        原始任務: {{$original_task}}
+        
+        程式語言: {{$language}}
+        
+        原始代碼:
+        ```
+        {{$code}}
+        ```
+        
+        執行錯誤:
+        ```
+        {{$error_message}}
+        ```
+        
+        請分析錯誤原因，然後提供修復後的完整代碼。你的回應必須包含以下部分:
+        
+        1. 錯誤分析: 簡要說明錯誤的原因
+        2. 修復方案: 描述你的修復方法
+        3. 完整代碼: 修復後的完整代碼，確保代碼可以執行
+        
+        按照以下格式回覆：
+        
+        ERROR_ANALYSIS:
+        [錯誤原因分析]
+        
+        FIX_APPROACH:
+        [修復方案描述]
+        
+        FIXED_CODE:
+        [完整修復後的代碼]
+        
+        只返回上述格式，不要有其他多餘的解釋或 markdown 標記。
+        """
+        
+        # 代碼修復配置
+        code_fix_config = PromptTemplateConfig(
+            template=code_fix_prompt,
+            name="fixBrokenCode",
+            template_format="semantic-kernel",
+            input_variables=[
+                InputVariable(name="original_task", description="原始任務描述", is_required=True),
+                InputVariable(name="language", description="程式語言", is_required=True),
+                InputVariable(name="code", description="需要修復的代碼", is_required=True),
+                InputVariable(name="error_message", description="錯誤訊息", is_required=True),
+            ],
+            execution_settings=AzureChatPromptExecutionSettings(
+                service_id="default",
+                max_tokens=3000,
+                temperature=0.2,
+            )
+        )
+        
+        # 添加代碼修復功能到 Kernel
+        self.code_fix_function = self.kernel.add_function(
+            function_name="fixBrokenCode",
+            plugin_name="codePlugin",
+            prompt_template_config=code_fix_config,
+        )
+    
+    def _register_test_data_gen_function(self):
+        """註冊測試數據生成功能"""
+        
+        # 測試數據生成提示模板
+        test_data_gen_prompt = """
+        我需要你為以下代碼生成測試數據，以便可以自動執行和測試。
+
+        程式語言: {{$language}}
+        
+        代碼:
+        ```
+        {{$code}}
+        ```
+        
+        請分析代碼並生成適當的測試數據。你的回應必須包含以下部分:
+        
+        1. 輸入分析: 分析代碼需要哪些輸入數據
+        2. 測試數據: 提供2-3組有意義的測試數據
+        3. 執行方法: 說明如何使用這些測試數據執行代碼
+        4. 修改建議: 如果需要修改代碼來接受測試數據，提供修改後的代碼
+        
+        按照以下格式回覆：
+        
+        INPUT_ANALYSIS:
+        [輸入數據分析]
+        
+        TEST_DATA:
+        [測試數據詳情]
+        
+        EXECUTION_METHOD:
+        [執行方法說明]
+        
+        MODIFIED_CODE:
+        [修改後的代碼，如果需要]
+        
+        只返回上述格式，不要有其他多餘的解釋或 markdown 標記。
+        """
+        
+        # 測試數據生成配置
+        test_data_gen_config = PromptTemplateConfig(
+            template=test_data_gen_prompt,
+            name="generateTestData",
+            template_format="semantic-kernel",
+            input_variables=[
+                InputVariable(name="language", description="程式語言", is_required=True),
+                InputVariable(name="code", description="需要測試的代碼", is_required=True),
+            ],
+            execution_settings=AzureChatPromptExecutionSettings(
+                service_id="default",
+                max_tokens=3000,
+                temperature=0.2,
+            )
+        )
+        
+        # 添加測試數據生成功能到 Kernel
+        self.test_data_gen_function = self.kernel.add_function(
+            function_name="generateTestData",
+            plugin_name="codePlugin",
+            prompt_template_config=test_data_gen_config,
+        )
+    
     async def process_message(self, message: str, sender: Optional[str] = None) -> str:
         """
         處理代碼相關請求
@@ -119,6 +253,8 @@ class CodeAgent(Agent):
         # 確保代碼生成功能已註冊
         if self.code_gen_function is None and self.kernel is not None:
             self._register_code_gen_function()
+            self._register_code_fix_function()
+            self._register_test_data_gen_function()
         
         # 提取代碼任務 (移除前綴詞)
         task = message
@@ -150,8 +286,23 @@ class CodeAgent(Agent):
                     if missing_deps and self.allow_installs:
                         install_logs = await self.install_dependencies(missing_deps)
                 
-                # 執行代碼
-                execution_result = await self.execute_code(code, language)
+                # 檢查代碼是否需要輸入數據，如果需要則生成測試數據
+                needs_input, test_data_result = await self.analyze_input_requirements(code, language)
+                
+                if needs_input:
+                    # 代碼需要輸入，使用生成的測試數據
+                    modified_code = test_data_result.get("modified_code", "")
+                    if modified_code:
+                        code = modified_code  # 使用修改後可自動執行的代碼
+                
+                # 執行代碼並自動修復錯誤
+                execution_result, fixed_code, fix_attempts, is_successful, fix_history = await self.execute_and_fix_code(
+                    code, language, task
+                )
+                
+                # 更新最終代碼
+                if fixed_code:
+                    code = fixed_code
                 
                 # 構建響應
                 response = f"# {language.capitalize()} 代碼\n\n"
@@ -164,7 +315,101 @@ class CodeAgent(Agent):
                         response += f"## 安裝日誌\n\n```\n{install_logs}\n```\n\n"
                 
                 response += f"## 代碼\n\n```{language}\n{code}\n```\n\n"
-                response += f"## 執行結果\n\n{execution_result}\n\n"
+                
+                # 添加測試數據分析（如果有）
+                if needs_input:
+                    response += f"## 輸入分析\n\n"
+                    response += f"{test_data_result.get('input_analysis', '代碼需要輸入數據來執行')}\n\n"
+                    
+                    response += f"## 測試數據\n\n"
+                    response += f"{test_data_result.get('test_data', '無法生成有效的測試數據')}\n\n"
+                    
+                    response += f"## 執行方法\n\n"
+                    response += f"{test_data_result.get('execution_method', '無執行方法建議')}\n\n"
+                
+                # 添加詳細的修復過程視覺化
+                if fix_attempts > 0:
+                    response += f"## 自動修復過程 ({fix_attempts}次嘗試)\n\n"
+                    response += f"最終執行狀態: {'✅ 成功' if is_successful else '❌ 仍有錯誤'}\n\n"
+                    
+                    # 顯示每次嘗試的詳細信息
+                    for i, record in enumerate(fix_history):
+                        if "attempt" in record:
+                            if "has_error" in record:  # 這是執行記錄
+                                attempt_num = record["attempt"]
+                                response += f"### 嘗試 {attempt_num + 1} - 執行代碼\n\n"
+                                
+                                # 顯示代碼片段 (為了簡潔，只顯示前幾行)
+                                code_preview = "\n".join(record["code"].split("\n")[:10])
+                                if len(record["code"].split("\n")) > 10:
+                                    code_preview += "\n# ... (省略部分代碼)"
+                                    
+                                response += f"```{language}\n{code_preview}\n```\n\n"
+                                
+                                # 顯示執行結果或錯誤
+                                if record["has_error"]:
+                                    response += f"#### ❌ 執行結果 (有錯誤)\n\n"
+                                    error_text = record["execution_result"]
+                                    # 提取關鍵錯誤信息
+                                    if "執行代碼出錯" in error_text:
+                                        error_lines = error_text.split("\n")
+                                        for line in error_lines:
+                                            if "執行代碼出錯" in line:
+                                                response += f"`{line}`\n\n"
+                                                break
+                                    else:
+                                        response += f"```\n{error_text[:200]}{'...' if len(error_text) > 200 else ''}\n```\n\n"
+                                else:
+                                    response += f"#### ✅ 執行成功\n\n"
+                                    result_preview = record["execution_result"][:200]
+                                    response += f"```\n{result_preview}{'...' if len(record['execution_result']) > 200 else ''}\n```\n\n"
+                            
+                            elif "error_analysis" in record:  # 這是修復嘗試記錄
+                                response += f"### 修復分析與策略\n\n"
+                                
+                                # 顯示錯誤分析
+                                response += "#### 錯誤分析\n\n"
+                                response += f"{record['error_analysis']}\n\n"
+                                
+                                # 顯示修復策略
+                                response += "#### 修復策略\n\n"
+                                response += f"{record['fix_approach']}\n\n"
+                                
+                                # 顯示代碼變更 (如果有)
+                                if record.get("status") == "代碼已修改":
+                                    response += "#### 代碼修改\n\n"
+                                    # 使用diff風格顯示變更
+                                    response += "```diff\n"
+                                    
+                                    # 簡化的代碼diff顯示
+                                    original_lines = record["original_code"].split("\n")
+                                    fixed_lines = record["fixed_code"].split("\n")
+                                    
+                                    # 只展示前後有變化的幾行
+                                    changes_found = False
+                                    for i in range(min(len(original_lines), len(fixed_lines))):
+                                        if original_lines[i] != fixed_lines[i]:
+                                            response += f"- {original_lines[i]}\n+ {fixed_lines[i]}\n"
+                                            changes_found = True
+                                    
+                                    # 處理長度不同的情況
+                                    if len(original_lines) < len(fixed_lines):
+                                        for i in range(len(original_lines), len(fixed_lines)):
+                                            response += f"+ {fixed_lines[i]}\n"
+                                            changes_found = True
+                                    elif len(original_lines) > len(fixed_lines):
+                                        for i in range(len(fixed_lines), len(original_lines)):
+                                            response += f"- {original_lines[i]}\n"
+                                            changes_found = True
+                                    
+                                    if not changes_found:
+                                        response += "代碼結構發生變化，但無法顯示簡單的行差異。\n"
+                                    
+                                    response += "```\n\n"
+                                else:
+                                    response += f"#### 狀態: {record.get('status', '未知')}\n\n"
+                
+                response += f"## 最終執行結果\n\n{execution_result}\n\n"
                 
                 if explanation:
                     response += f"## 説明\n\n{explanation}\n"
@@ -192,6 +437,235 @@ class CodeAgent(Agent):
             import traceback
             error_trace = traceback.format_exc()
             return f"處理您的代碼請求時出錯:\n\n```\n{error_trace}\n```"
+    
+    async def analyze_input_requirements(self, code: str, language: str) -> Tuple[bool, Dict[str, Any]]:
+        """
+        分析代碼是否需要輸入數據，如需要則生成測試數據
+        
+        Args:
+            code: 代碼
+            language: 程式語言
+            
+        Returns:
+            (是否需要輸入, 測試數據結果)
+        """
+        # 檢查是否包含輸入函數
+        needs_input = False
+        
+        input_patterns = {
+            "python": [r"input\s*\(", r"sys\.stdin", r"fileinput"],
+            "javascript": [r"prompt\s*\(", r"readline", r"process\.stdin"],
+            "java": [r"Scanner", r"System\.in", r"BufferedReader"],
+            "c++": [r"cin\s*>>", r"getline", r"scanf"],
+            "c#": [r"Console\.Read", r"Console\.ReadLine"]
+        }
+        
+        # 獲取對應語言的輸入模式
+        patterns = input_patterns.get(language.lower(), [])
+        
+        # 檢查代碼是否匹配任何輸入模式
+        for pattern in patterns:
+            if re.search(pattern, code):
+                needs_input = True
+                break
+        
+        # 如果需要輸入，生成測試數據
+        if needs_input:
+            try:
+                test_data_result = await self.generate_test_data(code, language)
+                return True, test_data_result
+            except Exception as e:
+                return True, {
+                    "input_analysis": f"檢測到代碼需要輸入，但生成測試數據時出錯: {str(e)}",
+                    "test_data": "無法生成測試數據",
+                    "execution_method": "請手動提供輸入數據執行此代碼"
+                }
+        else:
+            return False, {}
+    
+    async def generate_test_data(self, code: str, language: str) -> Dict[str, Any]:
+        """
+        為代碼生成測試數據
+        
+        Args:
+            code: 代碼
+            language: 程式語言
+            
+        Returns:
+            測試數據結果
+        """
+        try:
+            # 調用測試數據生成功能
+            result = await self.kernel.invoke(
+                self.test_data_gen_function,
+                KernelArguments(
+                    language=language,
+                    code=code
+                )
+            )
+            
+            # 解析生成的結果
+            response = str(result).strip()
+            parsed_result = self._parse_test_data_response(response)
+            return parsed_result
+            
+        except Exception as e:
+            raise Exception(f"測試數據生成失敗: {str(e)}")
+    
+    def _parse_test_data_response(self, response: str) -> Dict[str, Any]:
+        """
+        解析 AI 生成的測試數據響應
+        
+        Args:
+            response: AI 生成的響應
+            
+        Returns:
+            包含解析後信息的字典
+        """
+        result = {
+            "input_analysis": "",
+            "test_data": "",
+            "execution_method": "",
+            "modified_code": ""
+        }
+        
+        # 解析輸入分析
+        if "INPUT_ANALYSIS:" in response:
+            analysis_part = response.split("INPUT_ANALYSIS:", 1)[1]
+            if "TEST_DATA:" in analysis_part:
+                analysis_part = analysis_part.split("TEST_DATA:", 1)[0]
+            result["input_analysis"] = analysis_part.strip()
+        
+        # 解析測試數據
+        if "TEST_DATA:" in response:
+            test_data_part = response.split("TEST_DATA:", 1)[1]
+            if "EXECUTION_METHOD:" in test_data_part:
+                test_data_part = test_data_part.split("EXECUTION_METHOD:", 1)[0]
+            result["test_data"] = test_data_part.strip()
+        
+        # 解析執行方法
+        if "EXECUTION_METHOD:" in response:
+            method_part = response.split("EXECUTION_METHOD:", 1)[1]
+            if "MODIFIED_CODE:" in method_part:
+                method_part = method_part.split("MODIFIED_CODE:", 1)[0]
+            result["execution_method"] = method_part.strip()
+        
+        # 解析修改後的代碼
+        if "MODIFIED_CODE:" in response:
+            code_part = response.split("MODIFIED_CODE:", 1)[1].strip()
+            
+            # 移除 markdown 格式標記
+            code_text = code_part.strip()
+            # 移除開頭的 ```語言名稱
+            if code_text.startswith("```"):
+                first_line_end = code_text.find("\n")
+                if first_line_end != -1:
+                    code_text = code_text[first_line_end+1:]
+            
+            # 移除結尾的 ```
+            if code_text.endswith("```"):
+                code_text = code_text[:-3].strip()
+            
+            result["modified_code"] = code_text
+        
+        return result
+    
+    async def execute_and_fix_code(self, code: str, language: str, original_task: str) -> Tuple[str, Optional[str], int, bool, List[Dict[str, Any]]]:
+        """
+        執行代碼並嘗試自動修復錯誤，記錄修復過程
+        
+        Args:
+            code: 原始代碼
+            language: 程式語言
+            original_task: 原始任務描述
+            
+        Returns:
+            (執行結果, 修復後的代碼(如果有), 修復嘗試次數, 是否成功, 修復過程記錄)
+        """
+        # 記錄每次修復的詳細信息
+        fix_history = []
+        
+        # 為特定語言選擇執行方法
+        if language != "python":
+            # 非 Python 代碼不進行自動修復
+            execution_result = await self.execute_code(code, language)
+            return execution_result, None, 0, "錯誤" not in execution_result, fix_history
+        
+        # 執行 Python 代碼
+        current_code = code
+        fix_attempts = 0
+        is_successful = False
+        execution_result = None
+        
+        # 嘗試執行代碼，如有錯誤則修復
+        for attempt in range(self.max_fix_attempts + 1):
+            # 執行當前版本的代碼
+            execution_result = await self._execute_python(current_code)
+            
+            # 記錄此次執行結果
+            execution_record = {
+                "attempt": attempt,
+                "code": current_code,
+                "execution_result": execution_result,
+                "has_error": "執行代碼出錯" in execution_result or "Error" in execution_result
+            }
+            
+            # 檢查是否有錯誤
+            if not execution_record["has_error"]:
+                # 代碼執行成功
+                is_successful = True
+                fix_history.append(execution_record)
+                break
+            
+            # 到達最大嘗試次數
+            if fix_attempts >= self.max_fix_attempts:
+                fix_history.append(execution_record)
+                break
+            
+            # 嘗試修復代碼
+            try:
+                # 記錄修復嘗試
+                fix_record = {
+                    "attempt": attempt,
+                    "error_message": execution_result
+                }
+                
+                # 獲取修復方案
+                fixed_code_result = await self.fix_code(current_code, language, original_task, execution_result)
+                new_code = fixed_code_result.get("fixed_code")
+                
+                # 更新修復記錄
+                fix_record.update({
+                    "error_analysis": fixed_code_result.get("error_analysis", ""),
+                    "fix_approach": fixed_code_result.get("fix_approach", ""),
+                    "original_code": current_code,
+                    "fixed_code": new_code if new_code else current_code
+                })
+                
+                # 檢查修復的代碼是否與當前代碼相同
+                if new_code and new_code != current_code:
+                    current_code = new_code
+                    fix_attempts += 1
+                    fix_record["status"] = "代碼已修改"
+                else:
+                    # 代碼沒有變化，停止嘗試
+                    fix_record["status"] = "無法修復"
+                    fix_history.append(execution_record)
+                    fix_history.append(fix_record)
+                    break
+                
+                # 保存修復記錄
+                fix_history.append(execution_record)
+                fix_history.append(fix_record)
+                
+            except Exception as e:
+                # 修復過程出錯，停止嘗試
+                execution_result += f"\n\n自動修復過程中出錯: {str(e)}"
+                execution_record["fix_error"] = str(e)
+                fix_history.append(execution_record)
+                break
+        
+        return execution_result, current_code if fix_attempts > 0 else None, fix_attempts, is_successful, fix_history
     
     async def generate_smart_code(self, task: str) -> Dict[str, Any]:
         """
@@ -271,6 +745,89 @@ class CodeAgent(Agent):
         if "EXPLANATION:" in response:
             explanation_part = response.split("EXPLANATION:", 1)[1].strip()
             result["explanation"] = explanation_part
+        
+        return result
+    
+    async def fix_code(self, code: str, language: str, original_task: str, error_message: str) -> Dict[str, Any]:
+        """
+        嘗試修復代碼
+        
+        Args:
+            code: 需要修復的代碼
+            language: 程式語言
+            original_task: 原始任務描述
+            error_message: 錯誤訊息
+            
+        Returns:
+            包含修復分析和修復後代碼的字典
+        """
+        try:
+            # 調用代碼修復功能
+            result = await self.kernel.invoke(
+                self.code_fix_function,
+                KernelArguments(
+                    original_task=original_task,
+                    language=language,
+                    code=code,
+                    error_message=error_message
+                )
+            )
+            
+            # 解析生成的結果
+            response = str(result).strip()
+            parsed_result = self._parse_fix_response(response)
+            return parsed_result
+            
+        except Exception as e:
+            raise Exception(f"代碼修復失敗: {str(e)}")
+    
+    def _parse_fix_response(self, response: str) -> Dict[str, Any]:
+        """
+        解析 AI 生成的代碼修復響應
+        
+        Args:
+            response: AI 生成的響應
+            
+        Returns:
+            包含解析後信息的字典
+        """
+        result = {
+            "error_analysis": "",
+            "fix_approach": "",
+            "fixed_code": ""
+        }
+        
+        # 解析錯誤分析
+        if "ERROR_ANALYSIS:" in response:
+            analysis_part = response.split("ERROR_ANALYSIS:", 1)[1]
+            if "FIX_APPROACH:" in analysis_part:
+                analysis_part = analysis_part.split("FIX_APPROACH:", 1)[0]
+            result["error_analysis"] = analysis_part.strip()
+        
+        # 解析修復方案
+        if "FIX_APPROACH:" in response:
+            approach_part = response.split("FIX_APPROACH:", 1)[1]
+            if "FIXED_CODE:" in approach_part:
+                approach_part = approach_part.split("FIXED_CODE:", 1)[0]
+            result["fix_approach"] = approach_part.strip()
+        
+        # 解析修復後的代碼
+        if "FIXED_CODE:" in response:
+            code_part = response.split("FIXED_CODE:", 1)[1].strip()
+            
+            # 移除 markdown 格式標記
+            code_text = code_part.strip()
+            # 移除開頭的 ```語言名稱
+            if code_text.startswith("```"):
+                first_line_end = code_text.find("\n")
+                if first_line_end != -1:
+                    code_text = code_text[first_line_end+1:]
+            
+            # 移除結尾的 ```
+            if code_text.endswith("```"):
+                code_text = code_text[:-3].strip()
+            
+            result["fixed_code"] = code_text
         
         return result
     
