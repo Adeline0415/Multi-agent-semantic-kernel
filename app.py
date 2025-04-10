@@ -128,11 +128,14 @@ with st.sidebar:
             result = st.session_state.multi_agent_system.upload_document(tmp_path, doc_name or uploaded_file.name)
             st.sidebar.success(result)
             
-            # 確保將文檔信息添加到聊天上下文
-            st.session_state.chat_history.append({
-                "role": "system", 
-                "content": f"文檔 '{doc_name or uploaded_file.name}' 已上傳並準備好供分析。"
-            })
+            # 確保將文檔信息添加到聊天上下文 (這裡是關鍵部分)
+            doc_content = st.session_state.multi_agent_system.document_agent.get_document_content(doc_name or uploaded_file.name)
+            if doc_content:
+                # 將文檔內容添加到系統記憶中
+                st.session_state.multi_agent_system.memory_manager.add_memory(
+                    f"文檔 '{doc_name or uploaded_file.name}' 已上傳，內容如下：\n{doc_content[:500]}...(內容已截斷)",
+                    "system"
+                )
     
     
     

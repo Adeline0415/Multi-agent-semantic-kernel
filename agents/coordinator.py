@@ -44,22 +44,23 @@ class CoordinatorAgent(Agent):
         decision_prompt = """
         你是一個智能協調系統，負責將用戶請求路由到最合適的專業代理處理。
         請仔細分析用戶的輸入，理解其真實意圖，然後選擇最合適的代理。
-        
+
         可用的代理:
-        - conversation_agent: 處理一般對話、問候、閒聊、問答、概念解釋、推理分析、選擇題、測驗問題等
-        - document_agent: 處理文檔分析、摘要、文檔問答、檔案處理
-        - code_agent: 處理明確要求生成或分析代碼(code)的請求，如果用戶明確表示不要代碼，請不要選擇此代理
+        - conversation_agent: 處理一般對話、問候、閒聊、問答、概念解釋、推理分析
+        - document_agent: 處理文檔分析、摘要、文檔問答、檔案處理、內容介紹、文檔內容相關的任何問題
+        - code_agent: 處理明確要求生成或分析代碼的請求，如果用戶沒有明確要生成代碼，請不要選擇此代理
         - creative_agent: 處理創意內容生成、寫作、創意任務
         - search_agent: 處理明確需要最新網絡信息的搜尋請求
-        
+
         重要提示:
-        1. 用戶如果只是提到程式相關概念但沒有要求生成代碼，應該使用 conversation_agent
-        2. 請優先依照用戶當前最新訊息來判斷使用哪個agent，而不是之前的訊息
-        3. 選擇題、測驗問題、理論性問題應該使用 conversation_agent，即使題目中包含程式相關的內容
-        4. 只有當用戶明確需要網絡查詢或最新信息時才選擇 search_agent
-        5. 若無法判斷用戶要使用何種agent則default使用conversation_agent
-        6. 如果用戶使用否定句請正確閱讀其意圖，例如「不用幫我生code」應該使用 conversation_agent
-        7. 盡量使用用戶提問的語言作答
+        1. 如果用戶提及任何與「文檔」、「文件」、「內容」、「檔案」相關的問題，幾乎都應該選擇document_agent
+        2. 當用戶剛上傳文件後提問，即使沒有明確提及文檔，也應該優先考慮document_agent
+        3. 選擇題、測驗問題、理論性問題應該使用conversation_agent
+        4. 只有當用戶明確請求生成代碼時才選擇code_agent
+        5. 只有當用戶明確需要網絡查詢或最新信息時才選擇 search_agent
+        6. 若無法判斷用戶要使用何種agent則default使用conversation_agent
+        7. 如果用戶使用否定句請正確閱讀其意圖，例如「不要生code」則應該選擇code_agent以外的agent
+        8. 盡量使用用戶提問的語言作答
         
         用戶輸入: {{$input}}
         
@@ -138,6 +139,7 @@ class CoordinatorAgent(Agent):
             if selected_agent in self.agents:
                 # 委派任務給選定的代理
                 response = await self.agents[selected_agent].receive_message(task, self.name)
+                print(f"Routing decision for message: '{message[:50]}...' -> {selected_agent}") #debug
                 return response
             else:
                 # 如果選定的代理未註冊，使用對話代理
