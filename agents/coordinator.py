@@ -128,7 +128,8 @@ class CoordinatorAgent(Agent):
                 is_file_gen_by_ai = await self._is_file_generation_request(latest_message)
                 if is_file_gen_by_ai and "code_agent" in self.agents:
                     print(f"File generation detected by AI, routing to code_agent: '{latest_message[:50]}...'") #debug
-                    return await self.agents["code_agent"].receive_message(message, self.name)
+                    task_with_marker = f"[FILE_GENERATION_MODE=True]\n{message}"
+                    return await self.agents["code_agent"].receive_message(task_with_marker, self.name)
             
             # 2. 備用方案：使用關鍵字檢測
             latest_message_lower = latest_message.lower()
@@ -171,7 +172,8 @@ class CoordinatorAgent(Agent):
             # 如果關鍵字檢測判定為檔案生成請求，路由到code_agent
             if is_file_gen_request and "code_agent" in self.agents:
                 print(f"File generation detected by keywords, routing to code_agent: '{latest_message[:50]}...'") #debug
-                return await self.agents["code_agent"].receive_message(message, self.name)
+                task_with_marker = f"[FILE_GENERATION_MODE=True]\n{message}"
+                return await self.agents["code_agent"].receive_message(task_with_marker, self.name)
             
             # 3. 常規 AI 決策流程
             decision_result = await self.kernel.invoke(
@@ -206,64 +208,6 @@ class CoordinatorAgent(Agent):
             import traceback
             print(f"處理請求時出錯: {str(e)}\n{traceback.format_exc()}")
             return f"處理您的請求時出現了問題。請稍後再試。"
-    
-    # async def process_message(self, message: str, sender: Optional[str] = None) -> str:
-    #     """
-    #     處理用戶請求，決定由哪個代理處理
-        
-    #     Args:
-    #         message: 用戶訊息內容
-    #         sender: 訊息發送者 (通常是 "user")
-            
-    #     Returns:
-    #         處理結果
-    #     """
-    #     try:
-    #         # 確保決策功能已註冊
-    #         if self.decision_function is None and self.kernel is not None:
-    #             self._register_decision_function()
-
-            
-            
-    #          # 提取最新訊息進行決策
-    #         latest_message = message
-    #         if "[新問題]" in message:
-    #             parts = message.split("[新問題]")
-    #             if len(parts) > 1:
-    #                 latest_message = parts[1].strip()
-            
-    #         # 使用最新訊息進行決策
-    #         decision_result = await self.kernel.invoke(
-    #             self.decision_function,
-    #             KernelArguments(input=latest_message)
-    #         )
-            
-    #         # 解析決策結果
-    #         try:
-    #             decision = json.loads(str(decision_result))
-    #             selected_agent = decision.get("agent")
-    #             task = decision.get("task", message)
-    #         except (json.JSONDecodeError, AttributeError):
-    #             # 如果決策結果無法解析，使用備用邏輯
-    #             selected_agent = self._fallback_decision(latest_message)
-    #             task = message
-            
-    #         # 檢查選定的代理是否註冊
-    #         if selected_agent in self.agents:
-    #             # 委派任務給選定的代理
-    #             response = await self.agents[selected_agent].receive_message(task, self.name)
-    #             print(f"Routing decision for message: '{message[:50]}...' -> {selected_agent}") #debug
-    #             return response
-            
-    #         else:
-    #             # 如果選定的代理未註冊，使用對話代理
-    #             if "conversation_agent" in self.agents:
-    #                 return await self.agents["conversation_agent"].receive_message(message, self.name)
-    #             return f"無法處理您的請求。未找到合適的代理。"
-                
-    #     except Exception as e:
-    #         # 出錯時的友善回應
-    #         return f"處理您的請求時出現了問題。請稍後再試。"
         
     async def _is_file_generation_request(self, message: str) -> bool:
         """使用 AI 判斷是否為檔案生成請求"""

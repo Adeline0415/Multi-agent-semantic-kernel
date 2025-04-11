@@ -263,6 +263,52 @@ class CodeAgent(Agent):
             self._register_code_gen_function()
             self._register_code_fix_function()
             self._register_test_data_gen_function()
+
+        # 檢測是否是檔案生成模式
+        is_file_generation_mode = False
+        clean_message = message
+        
+        # 檢查特殊標記
+        if "[FILE_GENERATION_MODE=True]" in message:
+            is_file_generation_mode = True
+            # 移除標記，獲取乾淨的消息內容
+            clean_message = message.replace("[FILE_GENERATION_MODE=True]", "").strip()
+
+         # 檔案生成模式：生成代碼並執行，但不顯示代碼
+        if is_file_generation_mode:
+            # 提取任務描述
+            task = clean_message
+            
+            # 確定文件類型
+            file_type = await self._detect_file_type_with_ai(task)
+            
+            # 生成檔案創建代碼
+            code_result = await self.generate_file_creation_code(task, file_type)
+            code = code_result.get("code", "")
+            
+            # 執行代碼並返回結果
+            execution_result, fixed_code, fix_attempts, is_successful, fix_history = await self.execute_and_fix_code(code, "python", task)
+            if fixed_code:
+                code = fixed_code
+            # 提取檔案路徑
+            file_path = await self._extract_file_path_with_ai(execution_result)
+            
+            # 格式化響應，不包含代碼
+            if file_path:
+                response = f"✅ 已經為您生成檔案，保存在：`{file_path}`\n\n"
+                # 檢查檔案是否存在
+                if os.path.exists(file_path):
+                    file_size = os.path.getsize(file_path)
+                    response += f"檔案大小: {self._format_file_size(file_size)}\n"
+                    response += f"檔案類型: {os.path.splitext(file_path)[1]}\n\n"
+                    response += "您可以從上述路徑獲取該檔案。"
+                else:
+                    response += "⚠️ 警告：檔案可能已生成，但無法在指定路徑找到。"
+            else:
+                # 如果沒有檔案路徑，顯示執行結果
+                response = f"執行結果:\n\n{execution_result}"
+            
+            return response
         
         # 提取代碼任務 (移除前綴詞)
         task = message
@@ -577,6 +623,180 @@ class CodeAgent(Agent):
             result["modified_code"] = code_text
         
         return result
+    
+    async def _detect_file_type_with_ai(self, message: str) -> str:
+        """使用 AI 從用戶消息中檢測所需的文件類型"""
+        # 註冊文件類型判斷函數（如果尚未註冊）
+        if not hasattr(self, "file_type_function"):
+            from semantic_kernel.prompt_template import PromptTemplateConfig
+            from semantic_kernel.prompt_template.input_variable import InputVariable
+            from semantic_kernel.connectors.ai.open_ai import AzureChatPromptExecutionSettings
+            
+            prompt = """
+            請從用戶的消息中確定他們想要生成的文件類型。
+
+            文件類型可能包括：pdf, excel, xlsx, word, docx, csv, txt, ppt, pptx, json, html, 等。
+
+            即使用戶沒有明確指定文件格式，也請根據他們的描述或需求推斷最合適的文件類型。
+            如果消息中提到"表格"或數據分析，可能需要 excel 或 csv；
+            如果是文本內容，可能需要 txt, word 或 pdf；
+            如果是圖表或演示，可能需要 ppt。
+
+            只返回判斷的文件類型，無需其他解釋。如果無法確定，請返回 "pdf"（作為默認選項）。
+
+            用戶消息: {{$message}}
+            """
+            
+            config = PromptTemplateConfig(
+                template=prompt,
+                name="detectFileType",
+                template_format="semantic-kernel",
+                input_variables=[
+                    InputVariable(name="message", description="用戶消息", is_required=True),
+                ],
+                execution_settings=AzureChatPromptExecutionSettings(
+                    service_id="default",
+                    max_tokens=50,
+                    temperature=0.0,  # 確定性輸出
+                )
+            )
+            
+            self.file_type_function = self.kernel.add_function(
+                function_name="detectFileType",
+                plugin_name="codePlugin",
+                prompt_template_config=config,
+            )
+        
+        try:
+            # 調用 AI 判斷
+            from semantic_kernel.functions import KernelArguments
+            result = await self.kernel.invoke(
+                self.file_type_function,
+                KernelArguments(message=message)
+            )
+            
+            file_type = str(result).strip().lower()
+            
+            # 確保返回的文件類型是有效的
+            valid_types = ["pdf", "excel", "xlsx", "word", "docx", "csv", "txt", "ppt", "pptx", "json", "html"]
+            if file_type in valid_types:
+                return file_type
+            
+            # 處理一些常見的替代表達
+            if file_type in ["excel表格", "表格", "電子表格"]:
+                return "excel"
+            elif file_type in ["文本", "純文本"]:
+                return "txt"
+            elif file_type in ["演示文稿", "簡報", "投影片"]:
+                return "ppt"
+            
+            # 默認類型
+            return "pdf"
+        except Exception as e:
+            print(f"AI文件類型檢測失敗: {str(e)}")
+            # 失敗時使用默認類型
+            return "pdf"
+
+    async def _extract_file_path_with_ai(self, result_text: str) -> Optional[str]:
+        """使用 AI 從執行結果中提取文件路徑"""
+        # 註冊文件路徑提取函數（如果尚未註冊）
+        if not hasattr(self, "file_path_function"):
+            from semantic_kernel.prompt_template import PromptTemplateConfig
+            from semantic_kernel.prompt_template.input_variable import InputVariable
+            from semantic_kernel.connectors.ai.open_ai import AzureChatPromptExecutionSettings
+            
+            prompt = """
+            請從以下執行結果中提取生成檔案的完整路徑。
+
+            執行結果內容:
+            {{$result_text}}
+
+            檔案路徑通常出現在類似這樣的短語之後：
+            - "檔案已成功生成並保存到:"
+            - "保存在:"
+            - "文件路徑:"
+            - "已生成:"
+
+            路徑可能是Windows格式(如 C:\\Users\\name\\downloads\\file.pdf)或
+            Unix格式(如 /home/user/downloads/file.pdf)。
+
+            請只返回完整的檔案路徑，不要包含任何其他文字或解釋。
+            如果找不到路徑，請回答 "未找到檔案路徑"。
+            """
+            
+            config = PromptTemplateConfig(
+                template=prompt,
+                name="extractFilePath",
+                template_format="semantic-kernel",
+                input_variables=[
+                    InputVariable(name="result_text", description="執行結果文本", is_required=True),
+                ],
+                execution_settings=AzureChatPromptExecutionSettings(
+                    service_id="default",
+                    max_tokens=100,
+                    temperature=0.0,  # 確定性輸出
+                )
+            )
+            
+            self.file_path_function = self.kernel.add_function(
+                function_name="extractFilePath",
+                plugin_name="codePlugin",
+                prompt_template_config=config,
+            )
+        
+        try:
+            # 調用 AI 提取路徑
+            from semantic_kernel.functions import KernelArguments
+            result = await self.kernel.invoke(
+                self.file_path_function,
+                KernelArguments(result_text=result_text)
+            )
+            
+            path = str(result).strip()
+            
+            # 檢查結果是否是有效路徑
+            if path == "未找到檔案路徑":
+                return None
+                
+            # 簡單驗證是否看起來像路徑
+            if ('\\' in path or '/' in path) and '.' in path:
+                return path
+                
+            return None
+        except Exception as e:
+            print(f"AI路徑提取失敗: {str(e)}")
+            # 失敗時返回None
+            return None
+    
+    def _format_file_size(self, size_bytes: int) -> str:
+        """格式化文件大小"""
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size_bytes < 1024.0:
+                return f"{size_bytes:.2f} {unit}"
+            size_bytes /= 1024.0
+        return f"{size_bytes:.2f} TB"
+
+    async def generate_file_creation_code(self, task: str, file_type: str) -> Dict[str, Any]:
+        """生成創建文件的代碼"""
+        # 創建用於檔案生成的提示
+        file_gen_prompt = f"""
+        請生成一段Python代碼，用於創建一個{file_type}檔案，內容應該與以下任務相關：
+        
+        任務: {task}
+        
+        生成的代碼應該滿足以下要求：
+        1. 使用適當的Python庫生成{file_type}檔案
+        2. 將檔案保存在 'downloads' 目錄下（如果目錄不存在，應自動創建）
+        3. 檔案名稱應該合理且有意義
+        4. 代碼應處理所有可能的錯誤
+        5. 代碼應該在執行結束時打印檔案的絕對路徑，格式為：'檔案已成功生成並保存到: [路徑]'
+        
+        如果任務需要數據，請生成合理的示例數據或使用適當的數據結構。
+        """
+        
+        # 調用standard_code_gen來生成代碼
+        code_gen_result = await self.generate_smart_code(file_gen_prompt)
+        return code_gen_result
     
     async def execute_and_fix_code(self, code: str, language: str, original_task: str) -> Tuple[str, Optional[str], int, bool, List[Dict[str, Any]]]:
         """
