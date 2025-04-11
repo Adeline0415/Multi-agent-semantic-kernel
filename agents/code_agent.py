@@ -59,16 +59,18 @@ class CodeAgent(Agent):
         任務: {{$task}}
         
         你可以使用任何適合的程式語言來實現此任務。如果任務中沒有指定程式語言，請選擇最適合的語言。
-
-        如果任務涉及生成檔案、創建文件或保存內容，請特別注意：
-        1. 撰寫可生成用戶需求檔案的python code並執行
-        2. 若用戶無指定保存路徑代碼必須將生成的檔案保存到 "downloads" 目錄，若用戶有指定保存路徑則將生成的檔案保存到用戶指定的路徑
-        3. 如果目錄不存在，代碼應自動創建此目錄
-        4. 指定合適的文件名和擴展名
-        5. 在執行完成後，顯示檔案的完整保存路徑
-        6. 文檔內容一律使用英文
+    
+        重要指引:
+        - 除非用戶明確要求保存或產生檔案，否則不要在代碼中包含檔案寫入操作。
+        - 普通的代碼示例不應該自動保存結果到檔案中。
+        - 將計算結果儲存在 'result' 變數中，不要寫入檔案。
         
-        你的回應必須包含以下部分:
+        僅在任務明確要求生成檔案時（例如明確包含「生成檔案」、「保存為」、「輸出到文件」等詞語），才實現檔案生成功能，並遵循以下原則：
+        1. 將生成的檔案保存到 "downloads" 目錄（如不存在則創建）
+        2. 使用適當的文件名
+        3. 在執行完成後顯示檔案路徑
+        
+        如果是一般寫code的任務(非生成檔案的任務)你的回應必須包含以下部分:
         1. 程式語言: 你選擇使用的程式語言名稱
         2. 依賴項: 此代碼所需的所有依賴庫/模組列表，精確到版本號（如果重要）
         3. 完整代碼: 完整、可執行的代碼，包含所有必要的導入語句
@@ -800,7 +802,7 @@ class CodeAgent(Agent):
     
     async def execute_and_fix_code(self, code: str, language: str, original_task: str) -> Tuple[str, Optional[str], int, bool, List[Dict[str, Any]]]:
         """
-        執行代碼並嘗試自動修復錯誤，記錄修復過程
+        執行Python代碼並嘗試自動修復錯誤，記錄修復過程。非Python代碼僅返回提示不執行。
         
         Args:
             code: 原始代碼
@@ -813,11 +815,10 @@ class CodeAgent(Agent):
         # 記錄每次修復的詳細信息
         fix_history = []
         
-        # 為特定語言選擇執行方法
+        # 非 Python 代碼不執行
         if language != "python":
-            # 非 Python 代碼不進行自動修復
-            execution_result = await self.execute_code(code, language)
-            return execution_result, None, 0, "錯誤" not in execution_result, fix_history
+            message = f"已生成 {language} 代碼。目前系統僅支持執行 Python 代碼。"
+            return message, None, 0, True, fix_history
         
         # 執行 Python 代碼
         current_code = code
@@ -1115,50 +1116,6 @@ class CodeAgent(Agent):
             return f"安裝成功:\n{stdout}"
         except Exception as e:
             return f"安裝過程中出現錯誤: {str(e)}"
-    
-    async def execute_code(self, code: str, language: str) -> str:
-        """
-        執行各種程式語言的代碼，先檢查環境
-        
-        Args:
-            code: 要執行的代碼
-            language: 程式語言
-            
-        Returns:
-            執行結果
-        """
-        # 標準化語言名稱
-        language = language.lower().strip()
-        
-        # 移除可能的 markdown 格式標記
-        code = self._remove_markdown_format(code)
-        
-        # 檢查執行環境
-        env_checker = EnvironmentChecker()
-        env_ready, env_message = await env_checker.check_environment(language)
-        
-        if not env_ready:
-            return f"無法執行 {language} 代碼: 環境未準備好。\n\n{env_message}\n\n請安裝所需環境後再試。"
-        
-        # 根據不同語言選擇執行方法
-        if language in ["python", "py"]:
-            return await self._execute_python(code)
-        elif language in ["javascript", "js", "node"]:
-            return await self._execute_javascript(code)
-        elif language in ["java"]:
-            return await self._execute_java(code)
-        elif language in ["c#", "csharp", "cs"]:
-            return await self._execute_csharp(code)
-        elif language in ["c", "c++", "cpp"]:
-            return await self._execute_cpp(code)
-        elif language in ["php"]:
-            return await self._execute_php(code)
-        elif language in ["ruby", "rb"]:
-            return await self._execute_ruby(code)
-        elif language in ["r"]:
-            return await self._execute_r(code)
-        else:
-            return f"不支持執行 {language} 語言。代碼已生成，但需要您在適當的環境中手動運行。"
 
     def _remove_markdown_format(self, code: str) -> str:
         """移除 markdown 格式"""
@@ -1313,17 +1270,6 @@ class CodeAgent(Agent):
             return result or "代碼執行成功，但沒有產生輸出。"
         except Exception as e:
             return f"執行 JavaScript 時出錯: {str(e)}"
-
-    async def _handle_html(self, code: str) -> str:
-        """處理 HTML/CSS 代碼"""
-        try:
-            # 為 HTML 創建一個臨時文件
-            temp_file = Path("temp_page.html")
-            temp_file.write_text(code, encoding="utf-8")
-            
-            return f"HTML 代碼已保存到 {temp_file.absolute()}。請在瀏覽器中打開此文件查看結果。"
-        except Exception as e:
-            return f"處理 HTML 時出錯: {str(e)}"
 
     async def _execute_java(self, code: str) -> str:
         """執行 Java 代碼"""

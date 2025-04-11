@@ -155,10 +155,7 @@ class CoordinatorAgent(Agent):
             # 檢查是否同時包含動詞和名詞
             has_file_verb = any(verb in latest_message_lower for verb in file_verbs)
             has_file_noun = any(noun in latest_message_lower for noun in file_nouns)
-            
-            # 直接檔案擴展名檢測 (更寬鬆的匹配)
-            has_file_extension = any(ext in latest_message_lower for ext in [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".txt", ".ppt", ".pptx"])
-            
+             
             # 檢查一些常見的完整短語
             common_phrases = [
                 "存成檔案", "另存為", "輸出檔案", "製作報表", "生成報告", 
@@ -167,7 +164,7 @@ class CoordinatorAgent(Agent):
             has_common_phrase = any(phrase in latest_message_lower for phrase in common_phrases)
             
             # 如果同時包含動詞和名詞，或者有檔案擴展名，或者有常見短語，判定為檔案生成請求
-            is_file_gen_request = (has_file_verb and has_file_noun) or has_file_extension or has_common_phrase
+            is_file_gen_request = (has_file_verb and has_file_noun) or has_common_phrase
             
             # 如果關鍵字檢測判定為檔案生成請求，路由到code_agent
             if is_file_gen_request and "code_agent" in self.agents:
