@@ -10,6 +10,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from io import StringIO
 import pandas as pd
 from pathlib import Path
+import re
 
 from semantic_kernel.functions import KernelArguments
 from semantic_kernel import Kernel
@@ -143,11 +144,19 @@ class CodeAgent(Agent):
         {{$error_message}}
         ```
         
+        請按照以下指引修復代碼：
+    
+        1. 如果錯誤是「ModuleNotFoundError」或顯示「No module named X」，這表示需要安裝相應的模組。
+        - 在這種情況下，不要修改代碼邏輯，只需在分析中指出需要安裝哪些套件。
+        - 例如：「需要使用 pip install pandas 來安裝缺少的模組」。
+        
+        2. 對於其他類型的錯誤，請分析錯誤原因並修改代碼解決問題。
+        
         請分析錯誤原因，然後提供修復後的完整代碼。你的回應必須包含以下部分:
         
-        1. 錯誤分析: 簡要說明錯誤的原因
-        2. 修復方案: 描述你的修復方法
-        3. 完整代碼: 修復後的完整代碼，確保代碼可以執行
+        1. 錯誤分析: 簡要說明錯誤的原因，如果是模組缺失，明確指出需要安裝哪些套件
+        2. 修復方案: 描述你的修復方法，包括需要安裝的套件或修改的代碼
+        3. 完整代碼: 修復後的完整代碼（如果只需安裝模組，可以不做修改）
         
         按照以下格式回覆：
         
@@ -287,6 +296,11 @@ class CodeAgent(Agent):
             # 生成檔案創建代碼
             code_result = await self.generate_file_creation_code(task, file_type)
             code = code_result.get("code", "")
+
+            # 預先掃描並安裝依賴
+            installed_packages = await self._scan_imports_and_install(code)
+            if installed_packages:
+                print(f"為檔案生成預先安裝的依賴: {installed_packages}")
             
             # 執行代碼並返回結果
             execution_result, fixed_code, fix_attempts, is_successful, fix_history = await self.execute_and_fix_code(code, "python", task)
@@ -820,6 +834,16 @@ class CodeAgent(Agent):
             message = f"已生成 {language} 代碼。目前系統僅支持執行 Python 代碼。"
             return message, None, 0, True, fix_history
         
+        # 預先掃描代碼中的imports並安裝缺失的依賴
+        missing_imports = await self._scan_imports_and_install(code)
+        if missing_imports:
+            install_record = {
+                "type": "dependency_installation",
+                "missing_imports": missing_imports,
+                "installation_attempted": True
+            }
+            fix_history.append(install_record)
+
         # 執行 Python 代碼
         current_code = code
         fix_attempts = 0
@@ -838,6 +862,30 @@ class CodeAgent(Agent):
                 "execution_result": execution_result,
                 "has_error": "執行代碼出錯" in execution_result or "Error" in execution_result
             }
+
+            # 如果發現模組缺失錯誤，嘗試安裝
+            if "ModuleNotFoundError: No module named" in execution_result:
+                import re
+                module_match = re.search(r"No module named '([^']+)'", execution_result)
+                if module_match:
+                    module_name = module_match.group(1)
+                    
+                    # 記錄安裝嘗試
+                    install_record = {
+                        "type": "module_not_found",
+                        "module": module_name,
+                        "attempt": attempt
+                    }
+                    
+                    # 嘗試安裝缺失的模組
+                    install_result = await self.install_dependencies([module_name])
+                    install_record["install_result"] = install_result
+                    fix_history.append(install_record)
+                    
+                    # 重新執行代碼
+                    execution_result = await self._execute_python(current_code)
+                    execution_record["execution_result"] = execution_result
+                    execution_record["has_error"] = "執行代碼出錯" in execution_result or "Error" in execution_result
             
             # 檢查是否有錯誤
             if not execution_record["has_error"]:
@@ -845,7 +893,7 @@ class CodeAgent(Agent):
                 is_successful = True
                 fix_history.append(execution_record)
                 break
-            
+                
             # 到達最大嘗試次數
             if fix_attempts >= self.max_fix_attempts:
                 fix_history.append(execution_record)
@@ -1101,8 +1149,18 @@ class CodeAgent(Agent):
             
         try:
             # 使用 pip 安裝依賴
+            install_command = [sys.executable, "-m", "pip", "install"]
+            
+            # 添加 --user 選項，避免權限問題
+            # 注意：在某些環境中可能不需要此選項
+            # install_command.append("--user")
+            
+            install_command.extend(dependencies)
+            
+            print(f"執行安裝命令: {' '.join(install_command)}")
+            
             process = subprocess.Popen(
-                [sys.executable, "-m", "pip", "install"] + dependencies,
+                install_command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True
@@ -1111,12 +1169,30 @@ class CodeAgent(Agent):
             stdout, stderr = process.communicate()
             
             if process.returncode != 0:
-                return f"安裝依賴項時出錯:\n{stderr}"
+                error_msg = f"安裝依賴項時出錯:\n{stderr}"
+                print(error_msg)
+                return error_msg
             
-            return f"安裝成功:\n{stdout}"
+            success_msg = f"成功安裝依賴項:\n{dependencies}\n輸出:\n{stdout}"
+            print(success_msg)
+            
+            # 嘗試導入已安裝的模組，確保它們能被正確加載
+            for dep in dependencies:
+                module_name = dep.split('==')[0].split('>=')[0].split('<=')[0].strip()
+                try:
+                    # 重新加載模組，確保使用最新安裝的版本
+                    if module_name in sys.modules:
+                        importlib.reload(sys.modules[module_name])
+                    else:
+                        importlib.import_module(module_name)
+                except ImportError as ie:
+                    print(f"警告: 安裝後無法導入模組 {module_name}: {str(ie)}")
+            
+            return success_msg
         except Exception as e:
-            return f"安裝過程中出現錯誤: {str(e)}"
-
+            error_msg = f"安裝過程中出現錯誤: {str(e)}"
+            print(error_msg)
+            return error_msg
     def _remove_markdown_format(self, code: str) -> str:
         """移除 markdown 格式"""
         # 移除開頭的 ```語言名稱
@@ -1317,3 +1393,136 @@ class CodeAgent(Agent):
                 modules.add(base_module)
         
         return list(modules)
+    
+    async def _scan_imports_and_install(self, code: str) -> List[str]:
+        """
+        掃描代碼中的所有 import 語句，並安裝缺失的依賴
+        
+        Args:
+            code: Python 代碼
+            
+        Returns:
+            安裝的依賴列表
+        """
+        # 定義可能的第三方庫名稱與完整模組名稱的映射
+        common_packages = {
+            'numpy': 'numpy', 
+            'pandas': 'pandas',
+            'matplotlib': 'matplotlib',
+            'scipy': 'scipy',
+            'requests': 'requests',
+            'bs4': 'beautifulsoup4',
+            'beautifulsoup4': 'beautifulsoup4',
+            'sklearn': 'scikit-learn',
+            'tensorflow': 'tensorflow',
+            'torch': 'torch',
+            'cv2': 'opencv-python',
+            'PIL': 'pillow',
+            'seaborn': 'seaborn',
+            'nltk': 'nltk',
+            'spacy': 'spacy',
+            'django': 'django',
+            'flask': 'flask',
+            'sqlalchemy': 'sqlalchemy',
+            'pymongo': 'pymongo',
+            'pygame': 'pygame',
+            'pytest': 'pytest',
+            'plotly': 'plotly',
+            'dash': 'dash',
+            'bokeh': 'bokeh',
+            'networkx': 'networkx',
+            'scrapy': 'scrapy',
+            'flask_restful': 'flask-restful',
+            'PyPDF2': 'PyPDF2',
+            'pdfplumber': 'pdfplumber',
+            'reportlab': 'reportlab',
+            'openpyxl': 'openpyxl',
+            'xlrd': 'xlrd',
+            'xlwt': 'xlwt',
+            'xlsxwriter': 'XlsxWriter',
+            'docx': 'python-docx',
+            'python-docx': 'python-docx',
+            'pptx': 'python-pptx',
+            'python-pptx': 'python-pptx',
+            'pytesseract': 'pytesseract',
+            'tqdm': 'tqdm',
+            'pygame': 'pygame',
+            'gensim': 'gensim',
+            'transformers': 'transformers',
+            'textblob': 'textblob',
+        }
+        
+        # 抽取所有 import 語句
+        import re
+        # 匹配 import xxx 格式
+        import_pattern = re.compile(r'^\s*import\s+([a-zA-Z0-9_.,\s]+)', re.MULTILINE)
+        # 匹配 from xxx import yyy 格式
+        from_pattern = re.compile(r'^\s*from\s+([a-zA-Z0-9_.]+)\s+import', re.MULTILINE)
+        
+        # 抽取所有匹配的模組名稱
+        potential_modules = []
+        
+        # 處理 import xxx 格式
+        for match in import_pattern.finditer(code):
+            modules = match.group(1).split(',')
+            for module in modules:
+                # 分割出主模組名稱，去掉可能的子模組和空格
+                main_module = module.strip().split('.')[0]
+                potential_modules.append(main_module)
+        
+        # 處理 from xxx import yyy 格式
+        for match in from_pattern.finditer(code):
+            module = match.group(1).strip()
+            # 分割出主模組名稱，去掉可能的子模組
+            main_module = module.split('.')[0]
+            potential_modules.append(main_module)
+        
+        # 從 import 語句中識別的模組與標準庫的名稱列表
+        standard_libs = {
+            "abc", "aifc", "argparse", "array", "ast", "asyncio", "base64", 
+            "binascii", "bisect", "builtins", "calendar", "cmath", "collections", 
+            "concurrent", "configparser", "contextlib", "copy", "csv", "ctypes", 
+            "datetime", "decimal", "difflib", "dis", "distutils", "email", "encodings", 
+            "enum", "errno", "filecmp", "fileinput", "fnmatch", "fractions", 
+            "ftplib", "functools", "gc", "glob", "hashlib", "heapq", "hmac", "html", 
+            "http", "importlib", "inspect", "io", "ipaddress", "itertools", "json", 
+            "keyword", "linecache", "locale", "logging", "marshal", "math", "mimetypes", 
+            "mmap", "msvcrt", "multiprocessing", "netrc", "numbers", "operator", "os", 
+            "pathlib", "pickle", "pickletools", "platform", "plistlib", "poplib", "posix", 
+            "pprint", "profile", "pstats", "pwd", "py_compile", "pyclbr", "queue", 
+            "quopri", "random", "re", "reprlib", "resource", "select", "selectors", 
+            "shelve", "shlex", "shutil", "signal", "site", "smtplib", "socket", 
+            "socketserver", "sqlite3", "ssl", "stat", "statistics", "string", "stringprep", 
+            "struct", "subprocess", "sys", "sysconfig", "syslog", "tarfile", "tempfile", 
+            "termios", "textwrap", "threading", "time", "timeit", "token", "tokenize", 
+            "trace", "traceback", "tracemalloc", "tty", "turtle", "types", "typing", 
+            "unicodedata", "unittest", "urllib", "uu", "uuid", "venv", "warnings", 
+            "wave", "weakref", "webbrowser", "winreg", "winsound", "wsgiref", 
+            "xdrlib", "xml", "xmlrpc", "zipfile", "zipimport", "zlib"
+        }
+        
+        # 過濾掉標準庫，只保留可能需要安裝的第三方庫
+        third_party_modules = [m for m in potential_modules if m not in standard_libs]
+        
+        # 檢查這些模組是否已安裝
+        missing_modules = []
+        for module in third_party_modules:
+            try:
+                importlib.import_module(module)
+            except ImportError:
+                # 嘗試用映射找到正確的包名
+                if module in common_packages:
+                    missing_modules.append(common_packages[module])
+        
+        # 安裝缺失的依賴
+        installed_packages = []
+        if missing_modules and self.allow_installs:
+            for package in missing_modules:
+                # 嘗試安裝
+                try:
+                    await self.install_dependencies([package])
+                    installed_packages.append(package)
+                except Exception as e:
+                    print(f"安裝依賴 {package} 失敗: {str(e)}")
+        
+        return installed_packages
