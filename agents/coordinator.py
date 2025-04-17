@@ -49,7 +49,6 @@ class CoordinatorAgent(Agent):
         - conversation_agent: 處理一般對話、問候、閒聊、問答、概念解釋、推理分析
         - code_agent: 處理明確要求生成或分析代碼的請求，以及生成任何類型檔案的請求
         - document_agent: 處理閱讀和分析已上傳文檔的問題，但不負責生成新檔案
-        - creative_agent: 處理創意內容生成、寫作、創意任務
         - search_agent: 處理明確需要最新網絡信息的搜尋請求
 
         重要提示:
@@ -291,13 +290,6 @@ class CoordinatorAgent(Agent):
             "document", "uploaded", "summarize", "summary", "extract"
         ]
         
-        # 創意相關關鍵詞
-        creative_keywords = [
-            "寫", "創作", "故事", "文章", "創意", "設計", "廣告", "標語", 
-            "write", "create", "story", "article", "creative", "design", 
-            "advertisement", "slogan", "poem", "poetry"
-        ]
-        
         # 檢查關鍵詞匹配
         if any(keyword in message for keyword in search_keywords):
             return "search_agent"
@@ -305,8 +297,6 @@ class CoordinatorAgent(Agent):
             return "code_agent"
         elif any(keyword in message for keyword in document_keywords):
             return "document_agent"
-        elif any(keyword in message for keyword in creative_keywords):
-            return "creative_agent"
         else:
             return "conversation_agent"  # 默認使用對話代理
     

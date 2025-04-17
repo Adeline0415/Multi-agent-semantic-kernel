@@ -13,7 +13,6 @@ from agents.coordinator import CoordinatorAgent
 from agents.conversation_agent import ConversationAgent
 from agents.document_agent import DocumentAgent
 from agents.code_agent import CodeAgent
-from agents.creative_agent import CreativeAgent
 from agents.search_agent import SearchAgent
 from utils.memory_manager import MemoryManager
 
@@ -46,7 +45,6 @@ class MultiAgentSystem:
         self.conversation_agent = ConversationAgent()
         self.document_agent = DocumentAgent()
         self.code_agent = CodeAgent()
-        self.creative_agent = CreativeAgent()
         self.search_agent = SearchAgent()
         
         # 記錄系統是否已設置
@@ -91,14 +89,12 @@ class MultiAgentSystem:
             self.conversation_agent.setup_kernel(self.kernel)
             self.document_agent.setup_kernel(self.kernel)
             self.code_agent.setup_kernel(self.kernel)
-            self.creative_agent.setup_kernel(self.kernel)
             self.search_agent.setup_kernel(self.kernel)
             
             # 向協調器註冊所有代理
             self.coordinator.register_agent("conversation_agent", self.conversation_agent)
             self.coordinator.register_agent("document_agent", self.document_agent)
             self.coordinator.register_agent("code_agent", self.code_agent)
-            self.coordinator.register_agent("creative_agent", self.creative_agent)
             self.coordinator.register_agent("search_agent", self.search_agent)
             
             # 設置完成
@@ -316,7 +312,6 @@ class MultiAgentSystem:
             "conversation": self.conversation_agent,
             "document": self.document_agent,
             "code": self.code_agent,
-            "creative": self.creative_agent,
             "search": self.search_agent
         }
     
